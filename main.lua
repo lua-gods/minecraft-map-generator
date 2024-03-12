@@ -6,9 +6,9 @@ local generated = {}
 local currentPixel = -1
 
 local staircase = true
-local stairs = {[-1] = {}, [1] = {}}
+local stairsGroups = {[-1] = {}, [1] = {}}
 
-local commandSpeed = 1
+local commandSpeed = 20
 local commands = {}
 local commandData = {}
 
@@ -47,14 +47,15 @@ end
 local function generateMap()
    currentPixel = 0
    generated = {}
-   for x = 0, 127 do
-      generated[x] = {x = x, type = 'line'}
+   for x = 1, 128 do
+      generated[x] = {x = x - 1, type = 'line'}
    end
 end
 generateMap()
 
 local function buildMap()
    if not areaPos then return end
+   stairsGroups = {[-1] = {}, [1] = {}}
    table.insert(commands, {type = 'command', '/fill '..areaPos.x..' '..startHeight..' '..(areaPos.y - 1)..' '..(areaPos.x + 127)..' '..startHeight..' '..(areaPos.y - 1)..' stone'})
    for _, v in pairs(generated) do
       table.insert(commands, v)
@@ -68,21 +69,18 @@ function events.world_render()
    local maxTime = client.getSystemTime() + 10
    while client.getSystemTime() < maxTime and currentPixel < 128 * 128 do
       local x, y = math.floor(currentPixel / 128), currentPixel % 128
-      -- if y == 0 then table.insert(generated, {x = x, type = 'line'}) end
       local orginalColor = orginal:getPixel(x, y).xyz
       local dist = 10
-      local best--, best2
+      local best
       for _, v in pairs(colors) do
          local newDist = (v[1] - orginalColor):lengthSquared()
          if newDist < dist then
             dist = newDist
-            -- best2 = best
             best = v
          end
       end
-      -- if (x + y) % 2 == 0 then best = best2 end
       preview:setPixel(x, y,best[1])
-      table.insert(generated[x], {best[2], best[3]})
+      table.insert(generated[x + 1], {best[2], best[3]})
       currentPixel = currentPixel + 1
    end
    preview:update()
@@ -97,8 +95,10 @@ local commandTypes = {
       data.current = (data.current or 0) + 1
       if data.current > #tbl then return true end
       local blockData = tbl[data.current]
-      if blockData[2] == 0 then
-         local block = blockData[1]
+      local block = blockData[1]
+      local height = blockData[2]
+      data.height = (data.height or startHeight) + blockData[2]
+      if height == 0 then -- flat
          local start = data.current - 1
          for _ = data.current, #tbl - 1 do
             local nextBlockData = tbl[data.current + 1]
@@ -106,10 +106,37 @@ local commandTypes = {
             data.current = data.current + 1
          end
          local x = areaPos.x + tbl.x
-         host:sendChatCommand('/fill '..x..' '..data.height..' '..(areaPos.y + start)..' '..x..' '..data.height..' '..(areaPos.y + data.current - 1)..' '..blockData[1])
-      else
-         data.height = (data.height or startHeight) + blockData[2]
-         host:sendChatCommand('/setblock '..(areaPos.x + tbl.x)..' '..data.height..' '..(areaPos.y + data.current - 1)..' '..blockData[1])
+         host:sendChatCommand('/fill '..x..' '..data.height..' '..(areaPos.y + start)..' '..x..' '..data.height..' '..(areaPos.y + data.current - 1)..' '..block)
+      else -- staircase
+         local pos = vec(areaPos.x + tbl.x, data.height, areaPos.y + data.current - 1)
+         local len = 1
+         local stairs = stairsGroups[height][block]
+         -- magic
+         for k = data.current + 1, stairs and math.min(#tbl - 1, data.current + stairs.len - 1) or -1 do
+            local nextBlockData = tbl[k]
+            if nextBlockData[1] ~= block or nextBlockData[2] ~= height then break end
+            len = len + 1
+         end
+         if len == 1 then
+            host:sendChatCommand('/setblock '..pos.x..' '..pos.y..' '..pos.z..' '..block)
+         else
+            local stairStart = stairs.pos
+            local stairEnd = stairs.pos + vec(0, height, 1) * (len - 1)
+            local pasteHeight = pos.y
+            if height == -1 then pasteHeight = pasteHeight - len + 1 end
+            host:sendChatCommand('/clone '..stairStart.x..' '..stairStart.y..' '..stairStart.z..' '..stairEnd.x..' '..stairEnd.y..' '..stairEnd.z..' '..pos.x..' '..pasteHeight..' '..pos.z)
+         end
+         data.current = data.current + len - 1
+         data.height = data.height + height * (len - 1)
+         -- combine stairs
+         if stairs and stairs.pos + vec(0, stairs.len * height, stairs.len) ~= pos then
+            if stairs.len == len then stairs.pos = pos end
+            return
+         end
+         stairsGroups[height][block] = {
+            pos = stairs and stairs.pos or pos,
+            len = (stairs and stairs.len or 0) + len
+         }
       end
    end,
    command = function(tbl)
@@ -119,7 +146,7 @@ local commandTypes = {
 }
 function events.tick()
    -- if not generate or currentPixel ~= -1 then return end
-   if #commands == 0 then return end
+   if #commands == 0 then if A then print((client:getSystemTime() - A) / 1000) A = nil end return end
    tick = (tick + 1) % 20
    local commandCount = math.floor(tick / 20 * commandSpeed) - math.floor((tick - 1) / 20 * commandSpeed)
    for _ = 1, commandCount do
