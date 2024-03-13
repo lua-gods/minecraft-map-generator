@@ -8,6 +8,8 @@ local currentPixel = -1
 local staircase = true
 local stairsGroups = {[-1] = {}, [1] = {}}
 
+local dithering = true
+
 local commandSpeed = 20
 local commands = {}
 local commandData = {}
@@ -70,6 +72,7 @@ function events.world_render()
    while client.getSystemTime() < maxTime and currentPixel < 128 * 128 do
       local x, y = math.floor(currentPixel / 128), currentPixel % 128
       local orginalColor = orginal:getPixel(x, y).xyz
+      -- find best color
       local dist = 10
       local best
       for _, v in pairs(colors) do
@@ -79,6 +82,24 @@ function events.world_render()
             best = v
          end
       end
+      -- dithering
+      if dithering and (x + y) % 2 == 0 then
+         local dist2 = 10
+         local best2
+         for _, v in pairs(colors) do
+            if v ~= best then
+               local newDist = (v[1] - orginalColor):lengthSquared()
+               if newDist < dist2 then
+                  dist2 = newDist
+                  best2 = v
+               end
+            end
+         end
+         if (best2[1] - best[1]):length() < 0.1 then
+            best = best2
+         end
+      end
+      -- set pixel
       preview:setPixel(x, y,best[1])
       table.insert(generated[x + 1], {best[2], best[3]})
       currentPixel = currentPixel + 1
@@ -170,6 +191,7 @@ page:newText():setText('Clear area'):onPress(function()
    table.insert(commands, {type = 'command', '//pos2 '..table.concat({areaPos.x_y:add(127, max, 127):unpack()}, ',')})
    table.insert(commands, {type = 'command', '//set air'})
 end):setMargin(10)
-page:newToggle():setText('Staircase method'):onToggle(function(toggled) staircase = toggled generateMap() end):setToggled(staircase):setMargin(10)
+page:newToggle():setText('Staircase method'):onToggle(function(toggled) staircase = toggled generateMap() end):setToggled(staircase)
+page:newToggle():setText('dithering'):onToggle(function(toggled) dithering = toggled generateMap() end):setToggled(dithering):setMargin(10)
 page:newSlider():setText('cmd/s'):setRange(1, 1024):setStep(16, 1):setValue(commandSpeed):onScroll(function(value) commandSpeed = value end)
 page:newText():setText('generate'):onPress(buildMap)
