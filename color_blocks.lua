@@ -35,9 +35,11 @@ local colors = {}
 for _, v in pairs(blocks) do
    local block = world.newBlock(v)
    local color = block:getMapColor()
-   local colorId = tostring(color)
-   if not colors[colorId] then colors[colorId] = {color = color} end
-   table.insert(colors[colorId], {block, v})
+   if color ~= vec(0, 0, 0) then
+      local colorId = tostring(color)
+      if not colors[colorId] then colors[colorId] = {color = color} end
+      table.insert(colors[colorId], {block, v})
+   end
 end
 
 -- add extra blocks
